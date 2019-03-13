@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/crates/cmd-core/cmd-core.iml" filepath="$PROJECT_DIR$/crates/cmd-core/cmd-core.iml" />
+      <module fileurl="file://$PROJECT_DIR$/crates/cmd-procs/cmd-procs.iml" filepath="$PROJECT_DIR$/crates/cmd-procs/cmd-procs.iml" />
+      <module fileurl="file://$PROJECT_DIR$/cmd-rs.iml" filepath="$PROJECT_DIR$/cmd-rs.iml" />
+    </modules>
+  </component>
+</project>
