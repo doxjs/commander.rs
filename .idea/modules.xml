@@ -3,7 +3,8 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/crates/cmd-core/cmd-core.iml" filepath="$PROJECT_DIR$/crates/cmd-core/cmd-core.iml" />
-      <module fileurl="file://$PROJECT_DIR$/crates/cmd-procs/cmd-procs.iml" filepath="$PROJECT_DIR$/crates/cmd-procs/cmd-procs.iml" />
+      <module fileurl="file://$PROJECT_DIR$/crates/cmd-option/cmd-option.iml" filepath="$PROJECT_DIR$/crates/cmd-option/cmd-option.iml" />
+      <module fileurl="file://$PROJECT_DIR$/crates/cmd-command/cmd-procs.iml" filepath="$PROJECT_DIR$/crates/cmd-command/cmd-procs.iml" />
       <module fileurl="file://$PROJECT_DIR$/cmd-rs.iml" filepath="$PROJECT_DIR$/cmd-rs.iml" />
     </modules>
   </component>
