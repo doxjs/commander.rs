@@ -5,6 +5,8 @@
     <cargoProject FILE="$PROJECT_DIR$/cmd-macros/Cargo.toml" />
     <cargoProject FILE="$PROJECT_DIR$/cmd-procs/Cargo.toml" />
     <cargoProject FILE="$PROJECT_DIR$/cmd-core/Cargo.toml" />
+    <cargoProject FILE="$PROJECT_DIR$/cmd-option/Cargo.toml" />
+    <cargoProject FILE="$PROJECT_DIR$/cmd-compilation/Cargo.toml" />
   </component>
   <component name="ProjectRootManager">
     <output url="file://$PROJECT_DIR$/out" />
