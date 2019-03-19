@@ -1,136 +1,33 @@
 #![recursion_limit="128"]
-#![allow(dead_code)]
 #![allow(unused_variables)]
 
 extern crate proc_macro;
 
 use proc_macro::{TokenStream };
 use proc_macro2::{ TokenStream as TokenStream2, Span as Span2 };
-use syn::parse::{ Parse, ParseStream, Result, Error };
+use syn::parse::{ Parse, ParseStream, Result, Error, ParseBuffer };
 use syn::{ Ident, token, LitStr, ItemFn, FnArg };
-use syn::{ parse_macro_input, Token, bracketed };
+use syn::{ parse_macro_input, bracketed, Token };
 use syn::spanned::Spanned;
 use syn::punctuated::Punctuated;
 use quote::{ quote, quote_spanned, ToTokens };
-use cmd_core::{ Command, Argument, ArgumentType, Quantity };
+use cmd_compilation::{ QuantityToken, ArgumentToken, ArgumentTypeToken, is_match };
+use lazy_static::lazy_static;
 use std::process::exit;
+use std::sync::Mutex;
+use std::collections::HashMap;
+use cmd_core::{ Command, Argument, ArgumentType, Quantity, Options };
 
 const ERR_RED: &'static str = "\x1b[0;31m Compile time error \x1b[0m";
 
-macro_rules! import {
-    ($o: ident as $r: ident) => {
-        quote! {
-            use cmd_rs::{ $o as $r };
-        }
-    };
-    ($o: ident as $r: ident from $f: path) => {
-        quote! {
-            use $f::{ $o as $r };
-        }
-    }
-}
-
-macro_rules! fetch {
-    ($name: ident => $which: ident, $ty: ident) => {
-        {
-            quote! {
-                _cmd_Argument {
-                    name: format!("{}", #$name),
-                    tp: _cmd_ArgumentType::$which(_cmd_Quantity::$ty),
-                }
-            }
-        }
-    };
-}
-
-macro_rules! is_match {
-    ($span: ident => $ty: ident of $def: expr) => {
-        quote_spanned!{$span =>
-            {
-                $def as #$ty;
-            }
-        }
-    };
-}
-
-#[derive(Debug, PartialEq)]
-enum QuantityToken {
-    Single,
-    Multiple,
-}
-
-#[derive(Debug, PartialEq)]
-enum ArgumentTypeToken {
-    Required(QuantityToken),
-    Optional(QuantityToken),
-}
-
-#[derive(Debug)]
-struct ArgumentToken {
-    name: Ident,
-    tp: ArgumentTypeToken,
+lazy_static! {
+    static ref COM_TRANS: Mutex<HashMap<String, Vec<i32>>> = Mutex::new(HashMap::new());
 }
 
 struct CommandToken {
     name: Ident,
     args: Vec<ArgumentToken>,
     desc: Option<LitStr>,
-}
-
-impl ToTokens for ArgumentToken {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let ArgumentToken {
-            name,
-            tp,
-        } = self;
-        let mut tp_token: TokenStream2;
-        let name = format!("{}", name);
-
-        match tp {
-            ArgumentTypeToken::Required(QuantityToken::Single) => {
-                tp_token = fetch!(name => Required, Single);
-            },
-            ArgumentTypeToken::Required(QuantityToken::Multiple) => {
-                tp_token = fetch!(name => Required, Multiple);
-            },
-            ArgumentTypeToken::Optional(QuantityToken::Single) => {
-                tp_token = fetch!(name => Optional, Single);
-            },
-            ArgumentTypeToken::Optional(QuantityToken::Multiple) => {
-                tp_token = fetch!(name => Optional, Multiple);
-            },
-        }
-        tp_token.to_tokens(tokens);
-    }
-}
-
-impl ToTokens for CommandToken {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        let CommandToken {
-            name,
-            args,
-            desc,
-        } = self;
-        let name = format!("{}", name);
-        let desc = if let Some(litstr) = desc {
-            litstr.value()
-        } else {
-            String::new()
-        };
-        let expand = quote! {
-            _cmd_Command {
-                name: String::from(#name),
-                args: vec![#( #args ),*],
-                desc: String::from(#desc),
-            }
-        };
-
-        expand.to_tokens(tokens);
-    }
-}
-
-struct CommandsInputToken {
-    value: Punctuated<Ident, Token![,]>,
 }
 
 impl Parse for CommandToken {
@@ -233,10 +130,159 @@ impl Parse for CommandToken {
     }
 }
 
-impl Parse for CommandsInputToken {
+impl ToTokens for CommandToken {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let CommandToken {
+            name,
+            args,
+            desc,
+        } = self;
+        let name = format!("{}", name);
+        let desc = if let Some(litstr) = desc {
+            litstr.value()
+        } else {
+            String::new()
+        };
+        let expand = quote! {
+            _cmd_Command {
+                name: String::from(#name),
+                args: vec![#( #args ),*],
+                desc: String::from(#desc),
+            }
+        };
+
+        expand.to_tokens(tokens);
+    }
+}
+
+// options
+#[derive(Debug)]
+struct OptionsToken {
+    short: Ident,
+    long: Ident,
+    args: Vec<ArgumentToken>,
+    desc: Option<LitStr>,
+}
+
+impl ToTokens for OptionsToken {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        let OptionsToken {
+            short,
+            long,
+            args,
+            desc,
+        } = self;
+        let short = format!("{}", short);
+        let long = format!("{}", long);
+        let desc = if let Some(litstr) = desc {
+            litstr.value()
+        } else {
+            String::new()
+        };
+        let expand = quote! {
+            _cmd_Options {
+                short: String::from(#short),
+                long: String::from(#long),
+                args: vec![#( #args ),*],
+                desc: String::from(#desc),
+            }
+        };
+
+        expand.to_tokens(tokens);
+    }
+}
+
+// #[option([-s, --simple <name>], "hello world!")]
+impl Parse for OptionsToken {
     fn parse(tokens: ParseStream) -> Result<Self> {
-        Ok(CommandsInputToken {
-            value: tokens.parse_terminated(Ident::parse)?,
+        let input: ParseBuffer;
+        let short: Ident;
+        let long: Ident;
+        let mut args: Vec<ArgumentToken> = vec![];
+        let mut desc: Option<LitStr> = None;
+
+        bracketed!(input in tokens);
+        // skip single line
+        input.parse::<Token![-]>()?;
+        short = input.parse()?;
+        input.parse::<Token![,]>()?;
+        // skip double line
+        {
+            input.parse::<Token![-]>()?;
+            input.parse::<Token![-]>()?;
+        }
+        long = input.parse()?;
+
+        while !input.is_empty() {
+            let lookhead = input.lookahead1();
+
+            // required arguments should defined ahead of optional arguments
+            // these two kinds of arguments can't cross appear crossed
+            if lookhead.peek(token::Lt) {
+                input.parse::<token::Lt>()?;
+
+                let mut arg_type = ArgumentTypeToken::Required(QuantityToken::Single);
+                let arg_name: Ident = input.parse()?;
+                let span = arg_name.span();
+
+                if let Ok(_) = input.parse::<token::Dot3>() {
+                    arg_type = ArgumentTypeToken::Required(QuantityToken::Multiple);
+                }
+
+                if !args.is_empty() {
+                    let tail = args.get(args.len() - 1).unwrap();
+
+                    if let ArgumentTypeToken::Optional(_) = tail.tp {
+                        return Err(input.error(format!("{}:All [Optional Arguments] should be placed after all [Required Arguments]!", ERR_RED)));
+                    }
+                }
+                // advancing the next token
+                input.parse::<token::Gt>()?;
+
+                if let ArgumentTypeToken::Required(QuantityToken::Multiple) = arg_type {
+                    if !input.is_empty() {
+                        return Err(Error::new(span, format!("{}:[Multiple Optional ArgumentToken] should and only should be the last one argument!", ERR_RED)));
+                    }
+                }
+                args.push(ArgumentToken {
+                    name: arg_name,
+                    tp: arg_type,
+                });
+            } else if lookhead.peek(token::Bracket) {
+                let mut arg_type = ArgumentTypeToken::Optional(QuantityToken::Single);
+                let content;
+                let arg_name: Ident;
+
+                bracketed!(content in input);
+                arg_name = content.parse()?;
+
+                if let Ok(_) = content.parse::<token::Dot3>() {
+                    if input.is_empty() {
+                        arg_type = ArgumentTypeToken::Optional(QuantityToken::Multiple);
+                    } else {
+                        return Err(content.error(format!("{}:[Multiple Optional ArgumentToken] should and only should be the last one argument!", ERR_RED)));
+                    }
+                }
+
+                args.push(ArgumentToken {
+                    name: arg_name,
+                    tp: arg_type,
+                });
+            } else {
+                return Err(lookhead.error());
+            };
+        };
+
+        if tokens.peek(token::Comma) && tokens.peek2(LitStr) {
+            tokens.parse::<token::Comma>()?;
+            desc = tokens.parse()?;
+        }
+
+        Ok(OptionsToken {
+            short,
+            long,
+            args,
+            desc,
         })
     }
 }
@@ -426,7 +472,12 @@ pub fn command(args: TokenStream, input: TokenStream) -> TokenStream {
     let name_identifier = Ident::new("_cmd_temp_ident", Span2::call_site());
     let inputs = gen_fn_inputs(&cmd, &name_identifier);
 
+    if !COM_TRANS.lock().unwrap().contains_key(&name_str) {
+        COM_TRANS.lock().unwrap().insert(name_str.clone(), vec![]);
+    }
+    println!("inserted {:#?}", (*COM_TRANS).lock().unwrap().keys());
     TokenStream::from(quote! {
+        #[option([-h, --help], "show usage")]
         #action
 
         fn #pre_process() {
@@ -444,79 +495,80 @@ pub fn command(args: TokenStream, input: TokenStream) -> TokenStream {
     })
 }
 
-#[proc_macro]
-pub fn bind(tokens: TokenStream) -> TokenStream {
-    let cmds_token: CommandsInputToken = parse_macro_input!(tokens as CommandsInputToken);
-    let parameters = cmds_token.value;
-    let mut pre_fns = vec![];
+fn build_opt_from_token(token: &OptionsToken) -> Options {
+    let OptionsToken {
+        short,
+        long,
+        args,
+        desc,
+    } = token;
+    let short = format!("{}", short);
+    let long = format!("{}", long);
+    let desc = match desc.as_ref() {
+        Some(lit_str) => lit_str.value(),
+        None => String::new(),
+    };
+    let args: Vec<Argument> = {
+        let mut args_vec = vec![];
 
-    for fn_name in parameters.iter() {
-        pre_fns.push(Ident::new(&format!("_cmd_pre_{}", fn_name), fn_name.span()));
-    }
+        for arg_token in args {
+            let name = format!("{}", arg_token.name);
+            let arg: Argument =  match arg_token.tp {
+                ArgumentTypeToken::Optional(QuantityToken::Single) => {
+                    Argument {
+                        name,
+                        tp: ArgumentType::Optional(Quantity::Single),
+                    }
+                },
+                ArgumentTypeToken::Optional(QuantityToken::Multiple) => {
+                    Argument {
+                        name,
+                        tp: ArgumentType::Optional(Quantity::Multiple),
+                    }
+                },
+                ArgumentTypeToken::Required(QuantityToken::Single) => {
+                    Argument {
+                        name,
+                        tp: ArgumentType::Required(Quantity::Single),
+                    }
+                },
+                ArgumentTypeToken::Required(QuantityToken::Multiple) => {
+                    Argument {
+                        name,
+                        tp: ArgumentType::Required(Quantity::Multiple),
+                    }
+                },
+            };
 
-    TokenStream::from(quote! {
-        {
-            #(
-                (*COMMON_PRE_FNS).lock().unwrap().push(#pre_fns);
-            )*
+            args_vec.push(arg);
         }
-    })
+
+        args_vec
+    };
+
+    Options::new(short, long, args, desc)
 }
 
 #[proc_macro_attribute]
-pub fn init(_: TokenStream, input: TokenStream) -> TokenStream {
-    let main_fn: ItemFn = parse_macro_input!(input as ItemFn);
-    let span = main_fn.span();
-    let imports = vec![
-        import!(Argument as _cmd_Argument),
-        import!(ArgumentType as _cmd_ArgumentType),
-        import!(Quantity as _cmd_Quantity),
-        import!(Command as _cmd_Command),
-        import!(lazy_static as _cmd_lazy_static),
-        import!(normalize as _cmd_normalize),
-        import!(parse_cmd as _cmd_parse_cmd),
-        import!(InsSlice as _cmd_InsSlice),
-        import!(Instance as _cmd_Instance),
-        import!(HashMap as _cmd_HashMap from std::collections),
-        import!(Mutex as _cmd_Mutex from std::sync),
-    ];
+pub fn option(args: TokenStream, input: TokenStream) -> TokenStream {
+    let action: ItemFn = parse_macro_input!(input as ItemFn);
     let ItemFn {
-        block,
+        ident,
         ..
-    } = &main_fn;
+    } = &action;
+    let opt_token: OptionsToken = parse_macro_input!(args as OptionsToken);
+    let opt_name = format!("{}", opt_token.long);
+    let opt_ident = opt_token.long;
 
-    TokenStream::from(quote_spanned! {span=>
-        #(#imports)*
-
-        _cmd_lazy_static! {
-            pub static ref COMMON_COMMANDS: _cmd_Mutex<Vec<_cmd_Command>> = _cmd_Mutex::new(vec![]);
-            pub static ref COMMON_PRE_FNS: _cmd_Mutex<Vec<fn()>> = _cmd_Mutex::new(vec![]);
-            pub static ref COMMON_FNS_MAP: _cmd_Mutex<_cmd_HashMap<String, fn(_: _cmd_InsSlice)>> = _cmd_Mutex::new(_cmd_HashMap::new());
+    if COM_TRANS.lock().unwrap().contains_key(&opt_name) {
+        if let Some(v) = COM_TRANS.lock().unwrap().get_mut(&opt_name) {
+            v.push(0);
         }
+    } else {
+        COM_TRANS.lock().unwrap().insert(opt_name.clone(), vec![]);
+    }
 
-        fn main() {
-            #block
-
-            {
-                (*COMMON_PRE_FNS).lock().unwrap().iter().for_each(|f| f());
-
-                let ( cmd_ins, option_ins ) = _cmd_normalize(std::env::args(), &(*(*COMMON_COMMANDS).lock().unwrap()));
-
-                if let Some(ins) = cmd_ins {
-                    for cmd in &(*(*COMMON_COMMANDS).lock().unwrap()) {
-                        if cmd.name == ins.name {
-                            let slice = _cmd_parse_cmd(&ins, &cmd);
-
-                            if let Some(f) = (*(*COMMON_FNS_MAP).lock().unwrap()).get(&cmd.name) {
-                                f(slice);
-                            }
-
-                            break;
-                        }
-                    }
-                }
-            }
-
-        }
+    TokenStream::from(quote! {
+        #action
     })
 }

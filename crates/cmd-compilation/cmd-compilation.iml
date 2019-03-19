@@ -2,8 +2,8 @@
 <module type="RUST_MODULE" version="4">
   <component name="NewModuleRootManager" inherit-compiler-output="true">
     <exclude-output />
-    <content url="file://$MODULE_DIR$/../crates/cmd-option">
-      <sourceFolder url="file://$MODULE_DIR$/../crates/cmd-option/src" isTestSource="false" />
+    <content url="file://$MODULE_DIR$/../crates/cmd-compilation">
+      <sourceFolder url="file://$MODULE_DIR$/../crates/cmd-compilation/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/benches" isTestSource="true" />

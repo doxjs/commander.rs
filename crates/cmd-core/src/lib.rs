@@ -34,6 +34,29 @@ pub struct Command {
     pub desc: String,
 }
 
+impl Command {
+    pub fn new(name: String, args: Vec<Argument>, desc: String) -> Self {
+        Command {
+            name,
+            args,
+            desc,
+        }
+    }
+
+    pub fn empty() -> Command {
+        Command {
+            name: String::new(),
+            args: vec![],
+            desc: String::new(),
+        }
+    }
+
+    pub fn is(&self, cmd: &str) -> bool {
+        &self.name == cmd
+    }
+}
+
+
 #[derive(Debug)]
 pub struct Instance {
     pub name: String,
@@ -70,25 +93,23 @@ impl Instance {
     }
 }
 
-impl Command {
-    pub fn new(name: String, args: Vec<Argument>, desc: String) -> Self {
-        Command {
-            name,
+#[derive(Debug)]
+pub struct Options {
+    pub short: String,
+    pub long: String,
+    pub desc: String,
+    pub args: Vec<Argument>,
+}
+
+impl Options {
+    // -t, --test <req> [opt]
+    pub fn new(short: String, long: String, args: Vec<Argument>, desc: String) -> Self {
+        Options {
+            short,
+            long,
             args,
             desc,
         }
-    }
-
-    pub fn empty() -> Command {
-        Command {
-            name: String::new(),
-            args: vec![],
-            desc: String::new(),
-        }
-    }
-
-    pub fn is(&self, cmd: &str) -> bool {
-        &self.name == cmd
     }
 }
 
@@ -117,7 +138,7 @@ pub fn normalize(args: Args, cmds: &Vec<Command>) -> (Option<Instance>, Vec<Inst
                 }
             }
         } else if complex_long.is_match(&arg) {
-            if let Some(caps) = complex_long.captures(&arg) {
+            if let Some(caps) = complex_long. (&arg) {
                 let mut temp_args: Vec<&str> = (&caps[2]).split_terminator(" ").collect();
 
                 temp_args.dedup();
